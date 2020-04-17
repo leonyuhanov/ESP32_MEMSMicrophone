@@ -7,13 +7,13 @@
 #include "arduinoFFT.h"
 
 #define WIFI_CHANNEL 1
-#define I2S_SampleRate  44000
+#define I2S_SampleRate  44100
 #include "arduinoFFT.h"
 i2s_config_t i2s_config = {
       mode: (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
       sample_rate: I2S_SampleRate,
       bits_per_sample: I2S_BITS_PER_SAMPLE_32BIT,
-      channel_format: I2S_CHANNEL_FMT_ALL_RIGHT,
+      channel_format: I2S_CHANNEL_FMT_ONLY_LEFT,
       communication_format: (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_LSB),
       intr_alloc_flags: ESP_INTR_FLAG_LEVEL1,
       dma_buf_count: 8,
@@ -28,8 +28,9 @@ i2s_pin_config_t pin_config = {
 };
 const int i2s_num=0;
 int retStat = 0;
-int32_t sampleIn=0, avgGain=0, peaks[2]={60000,-60000}, avgSampleIn=0;
-unsigned short int numOfBlanks=1000, smoothingReads=100;
+int32_t sampleIn=0, avgGain=0, avgGainFilter=0, peaks[2]={60000,-60000}, avgSampleIn=0;
+int32_t currentRead=0;
+unsigned short int numOfBlanks=1000;
 int returnResult=0;
 
 //ESPNOW Stuff
@@ -41,8 +42,8 @@ uint8_t dataToSend[maxDataFrameSize];
 
 //FFT Stuff
 arduinoFFT FFT = arduinoFFT(); /* Create FFT object */
-const uint16_t samples = 128; //This value MUST ALWAYS be a power of 2
-const double samplingFrequency = I2S_SampleRate/2;
+const uint16_t samples = 16; //This value MUST ALWAYS be a power of 2
+const double samplingFrequency = I2S_SampleRate;
 unsigned int sampling_period_us;
 unsigned long microseconds;
 double vReal[samples];
@@ -69,19 +70,19 @@ void setup()
   
   pinMode(19, INPUT);
   returnResult = i2s_driver_install((i2s_port_t)i2s_num, &i2s_config, 0, NULL);
-  Serial.printf("\r\nDriver Install Result\t%d", returnResult);
+  //Serial.printf("\r\nDriver Install Result\t%d", returnResult);
   returnResult = i2s_set_pin((i2s_port_t)i2s_num, &pin_config);
-  Serial.printf("\r\nSET PIN Result\t%d", returnResult);
+  //Serial.printf("\r\nSET PIN Result\t%d", returnResult);
   returnResult = i2s_start((i2s_port_t)i2s_num);
-  Serial.printf("\r\nI2S Start Result\t%d", returnResult);
+  //Serial.printf("\r\nI2S Start Result\t%d", returnResult);
   Serial.print("\r\nBegin Level detect...");
-  Serial.print("\r\n\tRead 4000 samples to level out...");
+  Serial.printf("\r\n\tRead\t%d\tsamples to level out...", numOfBlanks);
   for(retStat=0; retStat<numOfBlanks; retStat++)
   {
     i2s_pop_sample((i2s_port_t)i2s_num, (char*)&sampleIn, portMAX_DELAY);
     delay(1);
   }
-  Serial.print("\r\n\tRead 2000 samples to get avg...");
+  Serial.printf("\r\n\tRead\t%d\tsamples to get avg...", numOfBlanks);
   for(retStat=0; retStat<numOfBlanks; retStat++)
   {
     i2s_pop_sample((i2s_port_t)i2s_num, (char*)&sampleIn, portMAX_DELAY);
@@ -90,29 +91,53 @@ void setup()
     delay(1);
   }
   avgGain = avgGain/numOfBlanks;
-  Serial.printf("\t\tAVG Gain=\t%i", avgGain);
+  
+  //Grab filtered gain
+  Serial.printf("\r\n\tRead\t%d\tsamples to get avg filter gain...", numOfBlanks);
+  for(retStat=0; retStat<numOfBlanks; retStat++)
+  {
+    i2s_pop_sample((i2s_port_t)i2s_num, (char*)&sampleIn, portMAX_DELAY);
+    sampleIn>>=14;
+    avgGainFilter += avgGain-sampleIn;
+    delay(1);
+  }
+  avgGainFilter = avgGainFilter/numOfBlanks;
+  //set peaks
   peaks[0]=-avgGain;
   peaks[1]=avgGain;
-  Serial.printf("\r\n\tSetting MAX gain to\t%i\tMin Gain to\t%i\r\n", peaks[0], peaks[1]);
+
+  Serial.printf("\r\nAVG Gain=\t%i\tAVG Filter\t%i\tMaxGain\t%i\tMinGain\t%i", avgGain, avgGainFilter, peaks[0], peaks[1]);
   delay(1000);
 }
 
 void loop()
 {
-  microseconds = micros();
+  //Serial.printf("\r\n%d", readMic(10, avgGain, avgGainFilter));
+  /*
+  currentRead = readMic(10, avgGain, avgGainFilter);
+  if(currentRead>avgGainFilter || currentRead<-avgGainFilter)
+  {
+    Serial.printf("\r\n%d", currentRead);
+  }
+  else
+  {
+    Serial.printf("\r\n0");
+  }
+  */
+  //microseconds = micros();
   for(int i=0; i<samples; i++)
   {
-      i2s_pop_sample((i2s_port_t)i2s_num, (char*)&sampleIn, portMAX_DELAY);
-      vReal[i] = sampleIn+avgGain;
-      //vReal[i] = sampleIn;
+      vReal[i] = readMic(5, avgGain, avgGainFilter);
       vImag[i] = 0;
+      /*
       while(micros() - microseconds < sampling_period_us)
       {
         //empty loop
       }
-      microseconds += sampling_period_us;
+      */
+      //microseconds += sampling_period_us;
   }
-  /* Print the results of the sampling according to time */
+  // Print the results of the sampling according to time
   
   //Serial.println("Data:");
   //PrintVector(vReal, samples, SCL_TIME);
@@ -126,9 +151,10 @@ void loop()
   //PrintVector(vImag, samples, SCL_INDEX);
   FFT.ComplexToMagnitude(vReal, vImag, samples); // Compute magnitudes
   //Serial.println("Computed magnitudes:");
-  PrintVector(vReal, (samples >> 1), SCL_FREQUENCY);
+  //PrintVector(vReal, (samples >> 1), SCL_FREQUENCY);
   //double x = FFT.MajorPeak(vReal, samples, samplingFrequency);
   //Serial.println(x, 6); //Print out what frequency is the most dominant.
+  txToMask(vReal);
   yield();
 }
 
@@ -155,57 +181,38 @@ void PrintVector(double *vData, uint16_t bufferSize, uint8_t scaleType)
     //  Serial.print("Hz");
     //Serial.print(" ");
     //Serial.println(vData[i], 4);
-    Serial.printf("\t%f", (roundf(vData[i])/2400000)*100 );
+    //Serial.printf("\t%f", (roundf(vData[i])/2400000)*100 );
+    Serial.printf("\t%f", roundf(vData[i]));
   }
-  Serial.println();
+  //Serial.println();
+  Serial.printf("\r\n");
 }
 
-/*
-void loop()
-{  
-  sampleIn=0;
-  avgSampleIn=0;
-
-  for(retStat=0; retStat<smoothingReads; retStat++)
+int32_t readMic(unsigned short int numberOfSamples, int32_t gain, int32_t fGain)
+{
+  unsigned short int samps=numberOfSamples;
+  int32_t inValues=0;
+  
+  for(samps; samps>0; samps--)
   {
     i2s_pop_sample((i2s_port_t)i2s_num, (char*)&sampleIn, portMAX_DELAY);
     sampleIn>>=14;
-    avgSampleIn+=sampleIn;
+    inValues += (gain-sampleIn)-fGain;
+    yield();
+    //delay(1);
   }
-  sampleIn = round((float)avgSampleIn/smoothingReads);
-  
-  if(sampleIn>0)
-  {
-    avgSampleIn = round( ((float)(sampleIn-avgGain)/peaks[0])*100 );
-    dataToSend[maxDataFrameSize-1]=1;
-    dataToSend[0] = avgSampleIn;
-    returnResult = esp_now_send(slave.peer_addr, dataToSend, maxDataFrameSize);
-    Serial.println( avgSampleIn );
-
-    if(avgSampleIn>100)
-    {
-      Serial.println("100");
-    }
-    else
-    {
-      Serial.println( avgSampleIn );
-    }
-
-  }
-
-  else if (sampleIn<0)
-  {
-    avgSampleIn = round( ((float)(sampleIn+avgGain)/peaks[1])*100 );
-    if(avgSampleIn<-100)
-    {
-      Serial.println("-100");
-    }
-    else
-    {
-      Serial.println( avgSampleIn );
-    }
-  }
-
- yield();
+  inValues = inValues/numberOfSamples;
+  return inValues;
 }
-*/
+
+void txToMask(double *vData)
+{
+  unsigned short int bCnt=0;
+  for(bCnt=0; bCnt<samples; bCnt++)
+  {
+    
+    dataToSend[bCnt] = (vData[bCnt]/10000)*100;
+  }
+  dataToSend[maxDataFrameSize-1]=1;
+  esp_now_send(slave.peer_addr, dataToSend, maxDataFrameSize);
+}
