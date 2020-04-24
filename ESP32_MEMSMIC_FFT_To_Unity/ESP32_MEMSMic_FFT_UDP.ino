@@ -31,8 +31,8 @@ unsigned short int numOfBlanks=1000;
 int returnResult=0;
 
 //ESPNOW Stuff
-const uint8_t maxDataFrameSize=64;
-uint8_t dataToSend[maxDataFrameSize+1];
+const int maxDataFrameSize=512;
+uint8_t dataToSend[(maxDataFrameSize/2)+1];
 
 //FFT Stuff
 arduinoFFT FFT = arduinoFFT(); /* Create FFT object */
@@ -49,8 +49,7 @@ double vImag[samples];
 
 const char * ssid = "WIFISSID";
 const char * password = "WIFIKEY";
-//IP ADDRESS OF THE PC RUNNING UNITY
-IPAddress unityVirtualEnvironment(192,168,1,10);   
+IPAddress unityVirtualEnvironment(192,168,1,146);   
 unsigned int txPort=1000;
 WiFiUDP udp;
 
@@ -115,8 +114,9 @@ void setup()
 
 void loop()
 {
-  //Serial.printf("\r\n%d", readMic(10, avgGain, avgGainFilter));
   /*
+  //Test basic waveform output
+  Serial.printf("\r\n%d", readMic(10, avgGain, avgGainFilter));
   currentRead = readMic(10, avgGain, avgGainFilter);
   if(currentRead>avgGainFilter || currentRead<-avgGainFilter)
   {
@@ -130,65 +130,19 @@ void loop()
   microseconds = micros();
   for(int i=0; i<samples; i++)
   {
-      vReal[i] = readMic(5, avgGain, avgGainFilter);
+      vReal[i] = readMic(2, avgGain, avgGainFilter); //
       vImag[i] = 0;
-     
       while(micros() - microseconds < sampling_period_us)
       {
         //empty loop
       }
-      
       microseconds += sampling_period_us;
   }
-  // Print the results of the sampling according to time
-  
-  //Serial.println("Data:");
-  //PrintVector(vReal, samples, SCL_TIME);
-  FFT.Windowing(vReal, samples, FFT_WIN_TYP_FLT_TOP, FFT_FORWARD);  // Weigh data  FFT_WIN_TYP_HAMMING
-  //Serial.println("Weighed data:");
-  //PrintVector(vReal, samples, SCL_TIME);
+  FFT.Windowing(vReal, samples, FFT_WIN_TYP_HAMMING, FFT_FORWARD);  // Weigh data  
   FFT.Compute(vReal, vImag, samples, FFT_FORWARD); // Compute FFT
-  //Serial.println("Computed Real values:");
-  //PrintVector(vReal, samples, SCL_INDEX);
-  //Serial.println("Computed Imaginary values:");
-  //PrintVector(vImag, samples, SCL_INDEX);
-  //FFT.ComplexToMagnitude(vReal, vImag, samples); // Compute magnitudes
-  //Serial.println("Computed magnitudes:");
-  //PrintVector(vReal, (samples >> 1), SCL_FREQUENCY);
-  //double x = FFT.MajorPeak(vReal, samples, samplingFrequency);
-  //Serial.println(x, 6); //Print out what frequency is the most dominant.
+  FFT.ComplexToMagnitude(vReal, vImag, samples); // Compute magnitudes
   renderUNITY(vReal);
   yield();
-}
-
-void PrintVector(double *vData, uint16_t bufferSize, uint8_t scaleType)
-{
-  for (uint16_t i = 0; i < bufferSize; i++)
-  {
-    double abscissa;
-    /* Print abscissa value */
-    switch (scaleType)
-    {
-      case SCL_INDEX:
-        abscissa = (i * 1.0);
-  break;
-      case SCL_TIME:
-        abscissa = ((i * 1.0) / samplingFrequency);
-  break;
-      case SCL_FREQUENCY:
-        abscissa = ((i * 1.0 * samplingFrequency) / samples);
-  break;
-    }
-    //Serial.print(abscissa, 6);
-    //if(scaleType==SCL_FREQUENCY)
-    //  Serial.print("Hz");
-    //Serial.print(" ");
-    //Serial.println(vData[i], 4);
-    Serial.printf("\t%d", ((int)(roundf(vData[i])/10000))%255 );
-    //Serial.printf("\t%f", roundf(vData[i]));
-  }
-  //Serial.println();
-  Serial.printf("\r\n");
 }
 
 int32_t readMic(unsigned short int numberOfSamples, int32_t gain, int32_t fGain)
@@ -207,19 +161,22 @@ int32_t readMic(unsigned short int numberOfSamples, int32_t gain, int32_t fGain)
   return inValues;
 }
 
+int32_t readMicOnce(int32_t gain, int32_t fGain)
+{
+  i2s_pop_sample((i2s_port_t)i2s_num, (char*)&sampleIn, portMAX_DELAY);
+  sampleIn>>=14;
+  return  (gain-sampleIn)-fGain;
+}
+
 void renderUNITY(double *vData)
 {
   unsigned short int bCnt=0;
-  for(bCnt=0; bCnt<samples; bCnt++)
+  for(bCnt=0; bCnt<samples/2; bCnt++)
   {
     dataToSend[bCnt] = ((int)(vData[bCnt]/10000))*100;
-    //Serial.printf("\t%d", dataToSend[bCnt]);
   }
-  //Serial.println();
-  dataToSend[maxDataFrameSize]=1;
+  dataToSend[maxDataFrameSize/2]=1;
   udp.beginPacket(unityVirtualEnvironment, txPort);
-  udp.write(dataToSend, maxDataFrameSize+1);
-  udp.endPacket();
-  //Serial.printf("SENT\r\n");
-  
+  udp.write(dataToSend, (maxDataFrameSize/2)+1);
+  udp.endPacket();  
 }
