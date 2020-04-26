@@ -10,10 +10,13 @@ The SPH0645LM4H module outputs data in MSB but use LSB in the I2S config
 
 # Notes about FFT
 
-I have no idea what im doing :)
+I have no idea what im doing, but it works!
 
 Im using this lib https://github.com/kosme/arduinoFFT
 
+# ESP32_MEMSMIC_FFT
+
+Does FFT with 512 samples (bins). We then use the 1st half of these bins as data to TX over ESPNOW. The variable "maxESPNowSamples" dicates teh number of averaged BINS you send to your device.
 
 # ESP32_MEMSMIC_FFT_To_Unity
 
