@@ -32,3 +32,7 @@ Does FFT with 512 samples (bins). We then use the 1st half of these bins as data
 # ESP32_MEMSMIC_FFT_To_Unity
 
 A demo that processes audio aquired using the above system and TX over UDP to a UNIT3D Virtual Environment taht simulates a Sptecrum VU meter of the data from the ESP32
+
+# Leveling the data in real time
+
+In both FFT examples we have an array of sampleSize/2 values that are the maximum values for MY MEMS MIC. This was created by slowly sweeping from 100hz to 10khz inot the mic and recording the maximum values the FFT bins record for that sweep. A real time variation is in the works. We would need to constantly adjust (every 1/2 or 1 second) the maximum FFT bin values based on the current audio environment  
